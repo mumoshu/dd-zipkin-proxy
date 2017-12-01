@@ -4,4 +4,7 @@ set -e
 
 CGO_ENABLED=0 GOOS=linux ./build.sh
 
-docker build --pull -t mumoshu/dd-zipkin-proxy-solo .
+IMAGE=mumoshu/dd-zipkin-proxy-solo:v0.0.8
+
+docker build --pull -t $IMAGE .
+docker push $IMAGE
