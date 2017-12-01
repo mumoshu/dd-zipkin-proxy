@@ -190,16 +190,16 @@ func finishTraces(traces map[int64]*tree, blacklist map[int64]none, output chan<
 		}
 
 		// if we have a root, try do error correction
-		root := trace.Root()
-		if root != nil {
-			correctTreeTimings(trace, root, 0)
-			metricsTracesCorrected.Mark(1)
-		} else {
-			// we don't have a root, what now?
-			log.Warnf("No root for trace %d with %d spans", traceID, trace.nodeCount)
-			metricsTracesWithoutRoot.Mark(1)
-			continue
-		}
+		//root := trace.Root()
+		//if root != nil {
+		//	correctTreeTimings(trace, root, 0)
+		//	metricsTracesCorrected.Mark(1)
+		//} else {
+		//	// we don't have a root, what now?
+		//	log.Warnf("No root for trace %d with %d spans", traceID, trace.nodeCount)
+		//	metricsTracesWithoutRoot.Mark(1)
+		//	continue
+		//}
 
 		// send all the spans to the output channel
 		for _, spans := range trace.nodes {
