@@ -1,10 +1,14 @@
-hash: 75d1093d3024c99d35576a2c56378338dc01d0fe252445b00cb0462510bf8eba
-updated: 2017-11-11T12:21:25.881643255Z
+hash: fbf05db65c9ca13bc089374f3aa36a71c0de7f674c622e3fd65759a851e3e752
+updated: 2017-11-30T23:10:37.103798945+09:00
 imports:
 - name: github.com/apache/thrift
   version: 4f77ab8e296d64c57e6ea1c6e3f0f152bc7d6a3a
   subpackages:
   - lib/go/thrift
+- name: github.com/coreos/go-iptables
+  version: 259c8e6a4275d497442c721fa52204d7a58bde8b
+  subpackages:
+  - iptables
 - name: github.com/DataDog/dd-trace-go
   version: 9234800b7bb0ffae18ca64026c5adcefaeebeadc
   subpackages:

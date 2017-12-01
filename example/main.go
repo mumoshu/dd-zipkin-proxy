@@ -1,17 +1,40 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/DataDog/dd-trace-go/tracer"
 	"github.com/flachnetz/dd-zipkin-proxy"
+	"github.com/flachnetz/dd-zipkin-proxy/iptables"
 	"github.com/openzipkin/zipkin-go-opentracing/thrift/gen-go/zipkincore"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
+	logrus.SetFormatter(&logrus.JSONFormatter{})
+	logrus.SetLevel(logrus.InfoLevel)
+
+	magicIp := os.Getenv("MAGIC_IP")
+	hostIf := os.Getenv("HOST_INTERFACE")
+	hostIp := os.Getenv("HOST_IP")
+
+	var err error
+	err = iptables.AddRule("udp", "8125", magicIp, hostIf, hostIp)
+	if err != nil {
+		panic(fmt.Errorf("magicIp=%s, hostIf=%s, hostIp=%s: %v", magicIp, hostIf, hostIp, err))
+	}
+	err = iptables.AddRule("udp", "8126", magicIp, hostIf, hostIp)
+	if err != nil {
+		panic(fmt.Errorf("magicIp=%s, hostIf=%s, hostIp=%s: %v", magicIp, hostIf, hostIp, err))
+	}
+	err = iptables.AddRule("tcp", "9411", magicIp, hostIf, hostIp)
+	if err != nil {
+		panic(fmt.Errorf("magicIp=%s, hostIf=%s, hostIp=%s: %v", magicIp, hostIf, hostIp, err))
+	}
 	converter := DefaultSpanConverter{}
 	zipkinproxy.Main(converter.Convert)
 }
@@ -20,6 +43,8 @@ type DefaultSpanConverter struct {
 }
 
 func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Span {
+	logrus.WithFields(logrus.Fields{"zipkinSpan": span}).Info("Convert started")
+
 	// ignore long running consul update tasks.
 	if span.Name == "watch-config-key-values" || span.Name == "catalog-services-watch" {
 		return nil
@@ -103,6 +128,8 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 	// overview of all resources belonging to the service. Can be removed in the future
 	// when datadog is changing things
 	converted.Name = converted.Service
+
+	logrus.WithFields(logrus.Fields{"zipkinSpan": span, "datadogSpan": converted}).Info("Convert finished")
 
 	return converted
 }

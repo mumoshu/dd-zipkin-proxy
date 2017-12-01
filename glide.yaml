@@ -33,6 +33,10 @@ import:
   version: 0.8.0
 - package: gopkg.in/tylerb/graceful.v1
   version: 1.2.15
+- package: github.com/coreos/go-iptables
+  version: v0.2.0
+  subpackages:
+  - iptables
 testImport:
 - package: github.com/onsi/gomega
   version: c463cd2a8578290d4be7a25cba69de81cf35785e
