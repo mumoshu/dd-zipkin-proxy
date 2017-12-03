@@ -14,13 +14,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var env string
+
 func main() {
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetLevel(logrus.InfoLevel)
 
-	magicIp := os.Getenv("MAGIC_IP")
-	hostIf := os.Getenv("HOST_INTERFACE")
-	hostIp := os.Getenv("HOST_IP")
+	magicIp := os.Getenv("DDZK_MAGIC_IP")
+	hostIf := os.Getenv("DDZK_HOST_INTERFACE")
+	hostIp := os.Getenv("DDZK_HOST_IP")
+	env = os.Getenv("DDZK_ENV")
 
 	var err error
 	err = iptables.AddRule("udp", "8125", magicIp, hostIf, hostIp)
@@ -103,6 +106,10 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 					converted.Error = int32(statusValue)
 				}
 			}
+		}
+
+		if _, exists := converted.Meta["env"]; !exists {
+			converted.Meta["env"] = env
 		}
 	}
 
