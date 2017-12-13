@@ -36,22 +36,22 @@ func AddRule(proto, appPort, magicIp, hostInterface, hostIP string) error {
 			protoMatched := strings.Contains(r, fmt.Sprintf("-p %s", proto))
 
 			if !dMatched {
-				log.Infof("Skipping %s from deletion because it doesn't match: -d %s", magicIp)
+				log.Infof("Skipping %s from deletion because it doesn't match: -d %s", r, magicIp)
 				return nil
 			}
 
 			if !iMatched {
-				log.Infof("Skipping %s from deletion because it doesn't match: -i %s", hostInterface)
+				log.Infof("Skipping %s from deletion because it doesn't match: -i %s", r, hostInterface)
 				return nil
 			}
 
 			if !dportMatched {
-				log.Infof("Skipping %s from deletion because it doesn't match: --dport %s", appPort)
+				log.Infof("Skipping %s from deletion because it doesn't match: --dport %s", r, appPort)
 				return nil
 			}
 
 			if !protoMatched {
-				log.Infof("Skipping %s from deletion because it doesn't match: -p %s", proto)
+				log.Infof("Skipping %s from deletion because it doesn't match: -p %s", r, proto)
 				return nil
 			}
 

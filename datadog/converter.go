@@ -5,7 +5,7 @@ import (
 	"github.com/openzipkin/zipkin-go-opentracing/thrift/gen-go/zipkincore"
 )
 
-type SpanConverterFunc func(span *zipkincore.Span) *tracer.Span
+type SpanConverterFunc func(span *zipkincore.Span) []*tracer.Span
 
 // Reads all zipkin spans from the given channel, converts them to datadog spans using the given converter
 // and write them into another channel.
@@ -17,8 +17,10 @@ func ConvertZipkinSpans(zipkinSpans <-chan *zipkincore.Span, converter SpanConve
 
 		for span := range zipkinSpans {
 			converted := converter(span)
-			if converted != nil {
-				datadogSpans <- converted
+			if converted != nil && len(converted) > 0 {
+				for _, c := range converted {
+					datadogSpans <- c
+				}
 			}
 		}
 	}()

@@ -12,6 +12,7 @@ import (
 	"github.com/flachnetz/dd-zipkin-proxy/iptables"
 	"github.com/openzipkin/zipkin-go-opentracing/thrift/gen-go/zipkincore"
 	"github.com/sirupsen/logrus"
+	"net/url"
 )
 
 var env string
@@ -45,7 +46,66 @@ func main() {
 type DefaultSpanConverter struct {
 }
 
-func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Span {
+func findAnnotationByName(annotations []*zipkincore.Annotation, name string) *zipkincore.Annotation {
+	for _, a := range annotations {
+		if a.Value == name {
+			return a
+		}
+	}
+	return nil
+}
+
+func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) []*tracer.Span {
+	spans := []*zipkincore.Span{}
+
+	annotations := span.Annotations
+
+	cs := findAnnotationByName(annotations, "cs")
+	cr := findAnnotationByName(annotations, "cr")
+
+	if cs != nil && cr != nil {
+		updatedAnnotations := []*zipkincore.Annotation{}
+
+		for _, a := range annotations {
+			if a.Value != "cs" && a.Value != "cr" {
+				updatedAnnotations = append(updatedAnnotations, a)
+			}
+		}
+
+		span.Annotations = updatedAnnotations
+
+		duration := cr.Timestamp - cs.Timestamp
+		clientSpan := &zipkincore.Span{
+			Name:              span.Name,
+			TraceID:           span.TraceID,
+			ID:                span.ID - 1,
+			ParentID:          span.ParentID,
+			Annotations:       []*zipkincore.Annotation{cs, cr},
+			BinaryAnnotations: span.BinaryAnnotations,
+			Debug:             span.Debug,
+			Timestamp:         &cs.Timestamp,
+			Duration:          &duration,
+			TraceIDHigh:       span.TraceIDHigh,
+		}
+
+		span.ParentID = &clientSpan.ID
+
+		spans = []*zipkincore.Span{clientSpan, span}
+	} else {
+		spans = []*zipkincore.Span{span}
+	}
+
+	result := []*tracer.Span{}
+	for _, s := range spans {
+		converted := converter.convert(s)
+		if converted != nil {
+			result = append(result, converted)
+		}
+	}
+	return result
+}
+
+func (converter *DefaultSpanConverter) convert(span *zipkincore.Span) *tracer.Span {
 	logrus.WithFields(logrus.Fields{"zipkinSpan": span}).Info("Convert started")
 
 	// ignore long running consul update tasks.
@@ -53,7 +113,8 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 		return nil
 	}
 
-	name := SimplifyResourceName(span.Name)
+	//name := SimplifyResourceName(span.Name)
+	name := span.Name
 
 	converted := &tracer.Span{
 		SpanID:   uint64(span.ID),
@@ -75,7 +136,8 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 	if len(span.BinaryAnnotations) > 0 {
 		converted.Meta = make(map[string]string, len(span.BinaryAnnotations))
 		for _, an := range span.BinaryAnnotations {
-			if an.AnnotationType == zipkincore.AnnotationType_STRING {
+			tpe := an.AnnotationType
+			if tpe == zipkincore.AnnotationType_STRING || tpe == zipkincore.AnnotationType_BOOL {
 				key := an.Key
 
 				// rename keys to better match the datadog one.
@@ -95,9 +157,23 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 			}
 		}
 
-		if url := converted.Meta["http.url"]; url != "" {
-			converted.Resource = SimplifyResourceName(url)
-			converted.Meta["http.url"] = RemoveQueryString(url)
+		httpRequestPath := ""
+
+		if urlStr := converted.Meta["http.url"]; urlStr != "" {
+			//converted.Resource = SimplifyResourceName(urlStr)
+			converted.Meta["http.url"] = RemoveQueryString(urlStr)
+
+			u, err := url.Parse(converted.Resource)
+			if err != nil {
+				logrus.Errorf(`failed to parse url "%s": %v`, urlStr, err)
+			}
+			httpRequestPath = u.Path
+		}
+
+		httpRequestMethod := ""
+
+		if method := converted.Meta["http.method"]; method != "" {
+			httpRequestMethod = strings.ToLower(method)
 		}
 
 		if status := converted.Meta["http.status_code"]; status != "" {
@@ -111,9 +187,66 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 		if _, exists := converted.Meta["env"]; !exists {
 			converted.Meta["env"] = env
 		}
-	}
 
-	updateInfoFromAnnotations(span, converted)
+		// Infer services, timestamps, durations from annotations
+		updateInfoFromAnnotations(span, converted)
+
+		isClient := false
+		for _, a := range span.Annotations {
+			if a.Value == "cs" || a.Value == "cr" {
+				isClient = true
+			}
+		}
+
+		// Prettify istio-proxy spans
+		if nodeId := converted.Meta["node_id"]; nodeId != "" {
+			regex := regexp.MustCompile(`^sidecar~\d+\.\d+\.\d+\.\d+~(?P<kube_pod_name>[^\.]+).(?P<kube_namespace>[^\.~]+).[^\.]+.svc.cluster.local`)
+			fmt.Printf("regex: '%v'\n", regex)
+			match := regex.FindStringSubmatch(nodeId)
+			if len(match) > 0 {
+				for i, name := range regex.SubexpNames() {
+					if i != 0 {
+						converted.Meta[name] = match[i]
+					}
+				}
+				converted.Meta["docker_container_name"] = "istio-proxy"
+
+				if httpRequestMethod != "" && httpRequestPath != "" {
+					if isClient {
+						converted.Name = fmt.Sprintf("proxy.req_%s_%s", httpRequestMethod, httpRequestPath)
+					} else {
+						converted.Name = fmt.Sprintf("proxy.res_%s_%s", httpRequestMethod, httpRequestPath)
+					}
+				}
+
+				converted.Type = "web"
+			}
+		}
+
+		// Prettify istio-ingress spans
+		if nodeId := converted.Meta["node_id"]; nodeId != "" {
+			regex := regexp.MustCompile(`^ingress~~(?P<kube_pod_name>[^\.]+).(?P<kube_namespace>[^\.~]+).[^\.]+.svc.cluster.local`)
+			fmt.Printf("regex: '%v'\n", regex)
+			match := regex.FindStringSubmatch(nodeId)
+			if len(match) > 0 {
+				for i, name := range regex.SubexpNames() {
+					if i != 0 {
+						converted.Meta[name] = match[i]
+					}
+				}
+				converted.Meta["docker_container_name"] = "istio-ingress"
+
+				if isClient {
+					converted.Service = "istio-ingress"
+					converted.Name = fmt.Sprintf("proxy.req_%s_%s", httpRequestMethod, httpRequestPath)
+				} else {
+					converted.Name = fmt.Sprintf("proxy.res_%s_%s", httpRequestMethod, httpRequestPath)
+				}
+
+				converted.Type = "web"
+			}
+		}
+	}
 
 	if ddService := converted.Meta["dd.service"]; ddService != "" {
 		converted.Service = ddService
@@ -134,7 +267,7 @@ func (converter *DefaultSpanConverter) Convert(span *zipkincore.Span) *tracer.Sp
 	// most of the time spend. This is why we just rename it to the service here so that we can get a nice
 	// overview of all resources belonging to the service. Can be removed in the future
 	// when datadog is changing things
-	converted.Name = converted.Service
+	//converted.Name = converted.Service
 
 	logrus.WithFields(logrus.Fields{"zipkinSpan": span, "datadogSpan": converted}).Info("Convert finished")
 
@@ -146,6 +279,10 @@ func updateInfoFromAnnotations(span *zipkincore.Span, converted *tracer.Span) {
 	var minTimestamp, maxTimestamp int64
 	for _, an := range span.Annotations {
 		if an.Value == "sr" && an.Host != nil && an.Host.ServiceName != "" {
+			converted.Service = an.Host.ServiceName
+		}
+
+		if an.Value == "cr" && an.Host != nil && an.Host.ServiceName != "" {
 			converted.Service = an.Host.ServiceName
 		}
 
